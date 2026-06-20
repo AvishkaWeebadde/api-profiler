@@ -288,6 +288,78 @@ The transformer is in place before any app code runs.
 
 ---
 
+---
+
+## Phase 2 — ASM visitor model
+
+**The visitor chain:** `ClassReader` → `ClassVisitor` → `MethodVisitor`
+
+```
+byte[]  →  ClassReader.accept(ClassVisitor)
+                │
+                ├── visitClass(...)         — class-level metadata
+                ├── visitField(...)         — one call per field
+                └── visitMethod(...)        — one call per method
+                         │
+                         └── returns a MethodVisitor (or null to skip the body)
+                                  │
+                                  ├── visitCode()
+                                  ├── visitInsn(opcode)        — zero-operand instructions
+                                  ├── visitVarInsn(op, slot)   — iload/istore/aload/...
+                                  ├── visitMethodInsn(...)     — invokevirtual/static/...
+                                  └── visitMaxs(maxStack, maxLocals)
+```
+
+Each callback maps to a `javap` section you've already seen. `visitMethod` is
+called once per method definition (not per call site). If you return `null` from
+`visitMethod`, ASM skips the method body entirely — use this when you only need
+the signature, not the instructions.
+
+**`ClassReader` flags:**  
+- `SKIP_CODE` — don't call any `visitInsn`-family methods (skips instruction stream)
+- `SKIP_FRAMES` — don't parse stack map frames (safe to skip when read-only)
+- `SKIP_DEBUG` — skip line numbers and local variable names
+
+In Phase 2 we used `SKIP_CODE | SKIP_FRAMES` since we only need method signatures.
+In Phase 3 we drop those flags to see (and modify) individual instructions.
+
+**`access` flags — the bitmask:**
+```java
+boolean isStatic  = (access & Opcodes.ACC_STATIC)  != 0;
+boolean isPublic  = (access & Opcodes.ACC_PUBLIC)   != 0;
+boolean isFinal   = (access & Opcodes.ACC_FINAL)    != 0;
+boolean isNative  = (access & Opcodes.ACC_NATIVE)   != 0;
+```
+The static/instance distinction controls slot numbering (ADR 001 + Phase 0 notes).
+A static method's first parameter is slot 0; an instance method's first parameter
+is slot 1 (slot 0 = `this`). Getting this wrong in Phase 3 causes a `VerifyError`.
+
+**Reading a method descriptor:**
+```
+([Ljava/lang/String;)V
+ ^                  ^
+ |                  return type: V = void
+ parameter: [ = array, Ljava/lang/String; = String reference
+
+(II)I           two ints in, one int out
+()J             no params, returns long
+(Ljava/lang/String;I)Z   String + int in, boolean out
+```
+
+**Output from Phase 2 against App:**
+```
+[profiler] found  App#main   descriptor=([Ljava/lang/String;)V   static=true
+```
+`main` is static (no `this`), takes a `String[]`, returns void. Confirmed.
+
+**Fat jar — why it's needed:**  
+The agent's `ClassFileTransformer` runs in the bootstrap classloader context.
+It cannot see jars on the application `-cp`. ASM must be bundled inside
+`profiler.jar` itself. The build script extracts ASM's `.class` files into
+`src/out/` before packaging, so they land in the same jar as `HelloAgent.class`.
+
+---
+
 ## Summary — things to know cold before Phase 1
 
 | Concept | Key point |

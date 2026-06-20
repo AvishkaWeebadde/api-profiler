@@ -8,7 +8,7 @@ One ADR per real fork — if a competent engineer could reasonably disagree, it 
 |---|-------|-------|--------|
 | 001 | Instrument via agent transformer vs AOP | 1 | decided — see ADR 001 |
 | 002 | ASM vs ByteBuddy vs Javassist | 2 | decided — see ADR 002 |
-| 003 | Timing injection approach (entry/exit advice) | 3 | pending |
+| 003 | Timing injection approach (entry/exit advice) | 3 | decided — see ADR 003 |
 | 004 | Targeting strategy (annotation vs package vs config) | 4 | pending |
 | 005 | Context propagation approach | 5 | pending |
 | 006 | Span output format (custom JSON vs OTLP) | 6 | pending |

@@ -4,15 +4,16 @@ import java.util.List;
 public class App {
     public static void main(String[] args) {
         System.out.println("[app] main() starting");
-
-        // Use ArrayList and String.format so we see those classes load
-        List<String> items = new ArrayList<>();
-        items.add("alpha");
-        items.add("beta");
-        for (String item : items) {
-            System.out.println("[app] item: " + item);
-        }
-
+        doWork();
         System.out.println("[app] main() done");
+    }
+
+    // Phase 3 target — static, void, gives us a meaningful elapsed time to observe
+    static void doWork() {
+        long sum = 0;
+        for (int i = 0; i < 10_000_000; i++) {
+            sum += i;
+        }
+        System.out.println("[app] doWork sum=" + sum);
     }
 }

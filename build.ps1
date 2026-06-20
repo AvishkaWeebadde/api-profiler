@@ -9,7 +9,11 @@ $asm = "lib\asm-9.7.1.jar"
 $out = "src\out"
 $jar = "src\profiler.jar"
 
-# 1. Compile agent (with ASM on classpath)
+# Clean output dir so stale ASM module-info.class never bleeds into compilation
+Remove-Item -Recurse -Force $out -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force $out | Out-Null
+
+# 1. Compile agent (with ASM on classpath, output dir is clean so no module confusion)
 javac -cp $asm -d $out src\HelloAgent.java
 
 # 2. Extract ASM classes into out/ so the fat jar includes them

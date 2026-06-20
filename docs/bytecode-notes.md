@@ -374,3 +374,89 @@ It cannot see jars on the application `-cp`. ASM must be bundled inside
 | Exception table | Separate from the instruction stream; maps ranges to handlers |
 | Void return | Opcode is `return` with no prefix |
 | `invokespecial` | Constructors and `super` calls — no virtual dispatch |
+
+---
+
+## Phase 3 — Injecting timing into one method
+
+**The ClassWriter chain (modifying, not just reading):**
+
+```
+byte[]  →  ClassReader
+                │
+                └── accept(TimingClassVisitor wrapping ClassWriter)
+                             │
+                             └── visitMethod("doWork") → TimingMethodVisitor
+                                          │
+                                          ├── visitCode()    → inject LSTORE startTime
+                                          ├── visitInsn(...) → on RETURN, inject timing print
+                                          └── all other visits pass through to ClassWriter
+                                                   │
+                                                   ▼
+                                              ClassWriter.toByteArray() → new byte[]
+```
+
+The key difference from Phases 1–2: `transform()` now returns `cw.toByteArray()` instead
+of `null`. The JVM loads our modified bytes, not the originals.
+
+**Two-pass slot calculation:**
+
+The target method's existing locals occupy slots 0..maxLocals-1. We must not
+write into those slots — that would corrupt the method's own variables.
+
+Pass 1 (read-only): visit the method, grab `maxLocals` from `visitMaxs(maxStack, maxLocals)`.  
+Pass 2 (modify): start our injected locals at slot `maxLocals`.
+
+For `doWork()` (static, `long sum` at 0-1, `int i` at 2): `maxLocals = 3`.  
+Our `startTime` (long) → slots 3-4. Our `elapsed` (long) → slots 5-6.
+
+**Why COMPUTE_FRAMES:**  
+`doWork()` has a loop (a back-jump), so the class file contains a `StackMapFrame`
+at the loop header. After inserting instructions, that frame's local variable
+count is stale. `COMPUTE_FRAMES` throws away all original frames and regenerates
+them via dataflow analysis — the only safe option when inserting locals into a
+method that has branching.
+
+**Instructions emitted at entry (`visitCode`):**
+```
+INVOKESTATIC java/lang/System.nanoTime ()J   ← pushes long onto stack
+LSTORE 3                                      ← pops long → slot 3-4 (startTime)
+```
+
+**Instructions emitted at exit (before each `RETURN`):**
+```
+INVOKESTATIC java/lang/System.nanoTime ()J   ← pushes endTime
+LLOAD 3                                       ← pushes startTime
+LSUB                                          ← pops both, pushes elapsed
+LSTORE 5                                      ← pops elapsed → slot 5-6
+GETSTATIC java/lang/System.out               ← pushes PrintStream
+NEW java/lang/StringBuilder                   ← pushes uninitialised SB ref
+DUP                                           ← duplicates ref (needed for <init>)
+LDC "[profiler] App#doWork took "            ← pushes String
+INVOKESPECIAL StringBuilder.<init> (String)V ← consumes ref + String, initialises
+LLOAD 5                                       ← pushes elapsed
+INVOKEVIRTUAL StringBuilder.append (J)SB     ← appends long, returns SB
+LDC " ns"
+INVOKEVIRTUAL StringBuilder.append (String)SB
+INVOKEVIRTUAL StringBuilder.toString ()String
+INVOKEVIRTUAL PrintStream.println (String)V  ← prints, returns void
+```
+
+**The `DUP` before `INVOKESPECIAL <init>` is mandatory.**  
+`INVOKESPECIAL <init>` consumes the reference on the stack (to initialise the
+object) but does NOT push a result. If you didn't `DUP` first, after `<init>`
+you'd have no reference left to call `append` on. This is a stack discipline
+rule specific to constructors — one of the things ASM does for you automatically
+if you use higher-level APIs, but must be done manually here.
+
+**Result:**
+```
+[profiler] doWork original maxLocals=3 — injecting startTime at slot 3
+[app] doWork sum=49999995000000
+[profiler] App#doWork took 8199800 ns   (~8.2 ms)
+```
+
+**Known gap:** if `doWork()` exits by throwing an exception, `visitInsn(RETURN)`
+never fires. The timer silently produces no output. Fixed in Phase 4 with a
+bytecode-level try/finally handler (`visitTryCatchBlock`). This is exactly the
+`finally` duplication pattern from Phase 0.

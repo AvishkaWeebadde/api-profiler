@@ -230,6 +230,64 @@ opcode. Note that constructors are named `<init>` in bytecode and called with
 
 ---
 
+---
+
+## Phase 1 — ClassFileTransformer observations
+
+**What fires `premain`:** The JVM calls `premain` before it calls `main()`. The
+agent is wired in at JVM startup via `-javaagent:profiler.jar`. By the time `main`
+runs, the transformer is already registered and has seen every class that loaded
+to get there.
+
+**`transform()` signature:**
+```java
+byte[] transform(ClassLoader loader, String className,
+                 Class<?> classBeingRedefined,
+                 ProtectionDomain protectionDomain,
+                 byte[] classfileBuffer)
+```
+- `className` is in **internal form** (`java/lang/String`, not `java.lang.String`).
+  Slashes, not dots. Convert with `.replace('/', '.')` for display.
+- `classfileBuffer` is the raw bytes of the `.class` file — exactly what `javap`
+  reads. This is what we will pass to ASM in Phase 2.
+- Return `null` to leave the class unchanged. Return a new `byte[]` to replace it.
+- `className` can be `null` for anonymous/hidden classes — always null-check it.
+
+**What actually loaded for `App` (12 classes total):**
+```
+#1  jdk.internal.vm.PostVMInitHook        — JVM startup hook
+#2  jdk.internal.vm.PostVMInitHook$2      — inner class of above
+#3  jdk.internal.util.EnvUtils            — env setup
+#4  jdk.internal.vm.PostVMInitHook$1      — another inner class
+#5  sun.launcher.LauncherHelper           — parses the command line, finds main()
+#6  java.nio.charset.CharsetDecoder       — needed for stdout encoding
+#7  sun.nio.cs.ArrayDecoder
+#8  sun.nio.cs.SingleByte$Decoder
+#9  java.util.concurrent.ConcurrentHashMap$ForwardingNode
+#10 App                                   — OUR class, loaded last before main()
+#11 java.lang.Shutdown                    — loaded after main() returns
+#12 java.lang.Shutdown$Lock
+```
+
+**Surprises:**
+- Only 12 classes in a trivial app. Most JDK classes (`String`, `Object`,
+  `System`, `ArrayList`) loaded *before* the agent was registered — they are
+  bootstrapped by the JVM itself before `premain` even fires. The transformer
+  never sees them. This is expected and fine for our use case (we want app
+  classes, not JDK internals).
+- `App` is class #10, not #1. Five classes load just to parse the command line
+  and find `main()` before our app code gets a turn.
+- `Shutdown` loads *after* `main()` returns — the transformer fires all the way
+  to JVM teardown, not just during startup.
+- `ArrayList` and `String` did NOT appear, confirming they bootstrapped before
+  the agent. If you need to instrument JDK classes you must use
+  `inst.addTransformer(t, true)` + `inst.retransformClasses()` — a Phase 8 topic.
+
+**The key confirmation:** `[profiler] agent loaded` prints before `[app] main() starting`.
+The transformer is in place before any app code runs.
+
+---
+
 ## Summary — things to know cold before Phase 1
 
 | Concept | Key point |

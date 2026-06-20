@@ -29,6 +29,5 @@ bin/
 .DS_Store
 
 ### Project ###
-lib/
 src/out/
 practice/out/

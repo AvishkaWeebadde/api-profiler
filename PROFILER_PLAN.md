@@ -1,4 +1,4 @@
-# Pluggable JVM Profiler — Build Plan
+1# Pluggable JVM Profiler — Build Plan
 
 **Goal:** A profiler I can attach to *any* JVM application that decomposes
 request latency by layer, built on ASM so I actually understand the JVM
@@ -184,12 +184,19 @@ format as the lingua franca of observability.
 feed Grafana Tempo / Jaeger. A single static-HTML waterfall viewer is enough —
 no UI framework.
 
+**Migrate to Maven at the start of this phase.** Phases 1–5 have one dependency
+(ASM) committed directly to `lib/`. Phase 6 adds OTLP/JSON dependencies and is
+the right time to switch. Use the Maven Shade plugin to produce the fat jar —
+it replaces the manual jar-extraction step in `build.ps1`. One afternoon cost,
+clean dependency management from here on.
+
 **Floor deliverable:** spans written to `spans.json` instead of stdout.
 
 **Done when:** I can open a request's waterfall and read the layer breakdown
 visually.
 
-**ADR prompt:** custom format vs OTLP (interop vs simplicity).
+**ADR prompt:** custom format vs OTLP (interop vs simplicity). Separate ADR for
+Maven Shade fat-jar packaging approach.
 
 **Rabbit-hole reward:** read how the OpenTelemetry Java agent structures its
 spans — your "annotate an expert codebase" hour.
